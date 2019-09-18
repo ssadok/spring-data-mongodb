@@ -2068,6 +2068,39 @@ public class MongoTemplate implements MongoOperations, ApplicationContextAware, 
 		return doAggregate(aggregation, collectionName, outputType, contextToUse);
 	}
 
+	public <O> AggregationResults<O> doAggregate(List<Bson> pipeline, String collectionName, Class<O> outputType) {
+
+		MongoTemplate.DocumentCallback<O> callback = new MongoTemplate.UnwrapAndReadDocumentCallback<>(mongoConverter, outputType, collectionName);
+
+
+		if (LOGGER.isDebugEnabled()) {
+			LOGGER.debug("Executing aggregation: {} in collection {}", serializeToJsonSafely(pipeline), collectionName);
+		}
+
+		return execute(collectionName, collection -> {
+
+			List<Document> rawResult = new ArrayList<>();
+
+			AggregateIterable<Document> aggregateIterable = collection.aggregate(pipeline, Document.class)
+					.collation(Aggregation.DEFAULT_OPTIONS.getCollation().map(Collation::toMongoCollation).orElse(null))
+					.allowDiskUse(Aggregation.DEFAULT_OPTIONS.isAllowDiskUse());
+
+			if (Aggregation.DEFAULT_OPTIONS.getCursorBatchSize() != null) {
+				aggregateIterable = aggregateIterable.batchSize(Aggregation.DEFAULT_OPTIONS.getCursorBatchSize());
+			}
+
+			MongoIterable<O> iterable = aggregateIterable.map(val -> {
+
+				rawResult.add(val);
+				return callback.doWith(val);
+			});
+
+			return new AggregationResults<>(iterable.into(new ArrayList<>()),
+					new Document("results", rawResult).append("ok", 1.0D));
+		});
+	}
+
+	
 	protected <O> AggregationResults<O> doAggregate(Aggregation aggregation, String collectionName, Class<O> outputType,
 			AggregationOperationContext context) {
 
